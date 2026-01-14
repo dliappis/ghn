@@ -21,7 +21,7 @@ func main() {
 	onlyRepos := flag.String("only-repos", "", "Comma-separated list of repositories to include (owner/repo)")
 	excludeRepos := flag.String("exclude-repos", "", "Comma-separated list of repositories to exclude (owner/repo)")
 	concurrency := flag.Int("concurrency", 1, "Number of concurrent workers for processing notifications")
-	actorFilter := flag.String("actor", "", "Only process notifications for PRs created by this actor (username)")
+	authorFilter := flag.String("author", "", "Only process notifications for PRs created by this author (username)")
 	flag.Parse()
 
 	token := os.Getenv("GITHUB_TOKEN")
@@ -77,7 +77,7 @@ func main() {
 		}
 	}
 
-	processNotifications(client, ctx, prNotifications, allNotifications, *concurrency, *noPrompt, *markDone, markingBehavior, *actorFilter)
+	processNotifications(client, ctx, prNotifications, allNotifications, *concurrency, *noPrompt, *markDone, markingBehavior, *authorFilter)
 }
 
 func getUnreadNotifications(client *github.Client, ctx context.Context) []*github.Notification {
@@ -179,7 +179,7 @@ func apiToWebURL(apiURL string) string {
 	return strings.Replace(url, "/pulls/", "/pull/", 1)
 }
 
-func processNotifications(client *github.Client, ctx context.Context, prNotifications []*github.Notification, allNotifications []*github.Notification, concurrency int, noPrompt bool, markDone bool, markingBehavior string, actorFilter string) {
+func processNotifications(client *github.Client, ctx context.Context, prNotifications []*github.Notification, allNotifications []*github.Notification, concurrency int, noPrompt bool, markDone bool, markingBehavior string, authorFilter string) {
 	if len(prNotifications) == 0 {
 		return
 	}
@@ -195,14 +195,14 @@ func processNotifications(client *github.Client, ctx context.Context, prNotifica
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
 
-			processNotification(client, ctx, n, allNotifications, noPrompt, markDone, markingBehavior, actorFilter)
+			processNotification(client, ctx, n, allNotifications, noPrompt, markDone, markingBehavior, authorFilter)
 		}(notification)
 	}
 
 	wg.Wait()
 }
 
-func processNotification(client *github.Client, ctx context.Context, notification *github.Notification, allNotifications []*github.Notification, noPrompt bool, markDone bool, markingBehavior string, actorFilter string) {
+func processNotification(client *github.Client, ctx context.Context, notification *github.Notification, allNotifications []*github.Notification, noPrompt bool, markDone bool, markingBehavior string, authorFilter string) {
 	subject := notification.GetSubject()
 	prURL := subject.GetURL()
 	parts := strings.Split(prURL, "/")
@@ -225,8 +225,8 @@ func processNotification(client *github.Client, ctx context.Context, notificatio
 	prIsClosed := pr.GetState() == "closed"
 	notificationIsRead := !notification.GetUnread()
 
-	// Skip if actor filter is set and doesn't match
-	if actorFilter != "" && !strings.EqualFold(prAuthor, actorFilter) {
+	// Skip if author filter is set and doesn't match
+	if authorFilter != "" && !strings.EqualFold(prAuthor, authorFilter) {
 		return
 	}
 
