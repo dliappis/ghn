@@ -16,7 +16,7 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -26,11 +26,11 @@ jobs:
           args: release --clean
 
       - name: generate build provenance (binaries)
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be #v2.4.0
+        uses: actions/attest-build-provenance@00014ed6ed5efc5b1ab7f7f34a39eb55d41aa4f8 #v3.1.0
         with:
           subject-path: "${{ github.workspace }}/dist/*.*"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: success() || failure()
         with:
           name: ghn-artifacts
