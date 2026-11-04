@@ -15,6 +15,9 @@ actionable notifications.
 
 Alternatively, you can even mark notifications as done via `--mark-done` rather than mark them as`read`.
 
+To also mark notifications from specific authors (e.g. bots) regardless of PR state, use
+`--mark-read-authors`, e.g. `./ghn --mark-read-authors renovate,dependabot`. The `[bot]` suffix is optional.
+
 Note that this script doesn't do anything related to the unread status of **issues** and solely focuses on PRs.
 
 ## Prerequisites
