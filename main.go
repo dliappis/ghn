@@ -22,6 +22,7 @@ func main() {
 	excludeRepos := flag.String("exclude-repos", "", "Comma-separated list of repositories to exclude (owner/repo)")
 	concurrency := flag.Int("concurrency", 1, "Number of concurrent workers for processing notifications")
 	authorFilter := flag.String("author", "", "Only process notifications for PRs created by this author (username)")
+	markReadAuthors := flag.String("mark-read-authors", "", "Comma-separated list of PR authors (e.g. renovate,dependabot); their notifications are marked regardless of PR state")
 	flag.Parse()
 
 	token := os.Getenv("GITHUB_TOKEN")
@@ -77,7 +78,17 @@ func main() {
 		}
 	}
 
-	processNotifications(client, ctx, prNotifications, allNotifications, *concurrency, *noPrompt, *markDone, markingBehavior, *authorFilter)
+	var markReadAuthorsSet map[string]struct{}
+	if *markReadAuthors != "" {
+		markReadAuthorsSet = make(map[string]struct{})
+		for _, a := range strings.Split(*markReadAuthors, ",") {
+			if a = normalizeLogin(a); a != "" {
+				markReadAuthorsSet[a] = struct{}{}
+			}
+		}
+	}
+
+	processNotifications(client, ctx, prNotifications, allNotifications, *concurrency, *noPrompt, *markDone, markingBehavior, *authorFilter, markReadAuthorsSet)
 }
 
 func getUnreadNotifications(client *github.Client, ctx context.Context) []*github.Notification {
@@ -146,6 +157,14 @@ func getNotificationThreadID(notifications []*github.Notification, owner string,
 	return ""
 }
 
+// normalizeLogin lowercases a login and strips the "[bot]" suffix and "app/" prefix
+// so that "renovate", "app/renovate" and "renovate[bot]" all match.
+func normalizeLogin(login string) string {
+	login = strings.ToLower(strings.TrimSpace(login))
+	login = strings.TrimPrefix(login, "app/")
+	return strings.TrimSuffix(login, "[bot]")
+}
+
 func atoi(s string) int {
 	v, _ := strconv.Atoi(s)
 	return v
@@ -179,7 +198,7 @@ func apiToWebURL(apiURL string) string {
 	return strings.Replace(url, "/pulls/", "/pull/", 1)
 }
 
-func processNotifications(client *github.Client, ctx context.Context, prNotifications []*github.Notification, allNotifications []*github.Notification, concurrency int, noPrompt bool, markDone bool, markingBehavior string, authorFilter string) {
+func processNotifications(client *github.Client, ctx context.Context, prNotifications []*github.Notification, allNotifications []*github.Notification, concurrency int, noPrompt bool, markDone bool, markingBehavior string, authorFilter string, markReadAuthors map[string]struct{}) {
 	if len(prNotifications) == 0 {
 		return
 	}
@@ -195,14 +214,14 @@ func processNotifications(client *github.Client, ctx context.Context, prNotifica
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
 
-			processNotification(client, ctx, n, allNotifications, noPrompt, markDone, markingBehavior, authorFilter)
+			processNotification(client, ctx, n, allNotifications, noPrompt, markDone, markingBehavior, authorFilter, markReadAuthors)
 		}(notification)
 	}
 
 	wg.Wait()
 }
 
-func processNotification(client *github.Client, ctx context.Context, notification *github.Notification, allNotifications []*github.Notification, noPrompt bool, markDone bool, markingBehavior string, authorFilter string) {
+func processNotification(client *github.Client, ctx context.Context, notification *github.Notification, allNotifications []*github.Notification, noPrompt bool, markDone bool, markingBehavior string, authorFilter string, markReadAuthors map[string]struct{}) {
 	subject := notification.GetSubject()
 	prURL := subject.GetURL()
 	parts := strings.Split(prURL, "/")
@@ -230,11 +249,17 @@ func processNotification(client *github.Client, ctx context.Context, notificatio
 		return
 	}
 
-	if prIsMerged || prIsClosed {
+	_, authorListed := markReadAuthors[normalizeLogin(prAuthor)]
+
+	if prIsMerged || prIsClosed || authorListed {
 		if notificationIsRead {
 			return
 		}
-		fmt.Printf("🟡 PR: %s, Author: @%s, Title: \"%s\", is merged or closed and notification will be marked as %s\n", prBrowserFriendlyURL, prAuthor, prTitle, markingBehavior)
+		reason := "is merged or closed"
+		if authorListed && !prIsMerged && !prIsClosed {
+			reason = "was created by an author in the mark-read list"
+		}
+		fmt.Printf("🟡 PR: %s, Author: @%s, Title: \"%s\", %s and notification will be marked as %s\n", prBrowserFriendlyURL, prAuthor, prTitle, reason, markingBehavior)
 
 		threadID := getNotificationThreadID(allNotifications, owner, repo, prNumber)
 		if threadID != "" {
